@@ -614,4 +614,14 @@ public interface QuestHelperConfig extends Config
 	{
 		return false;
 	}
+	@ConfigItem(
+		keyName = "dynamicSequencerEnabled",
+		name = "Enable Dynamic Sequencer",
+		description = "Enable or disable the dynamic sequencer feature",
+		position = 10
+	)
+	default boolean dynamicSequencerEnabled()
+	{
+		return false;
+	}
 }

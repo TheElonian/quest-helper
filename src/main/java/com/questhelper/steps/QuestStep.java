@@ -56,6 +56,7 @@ import lombok.NonNull;
 import lombok.Setter;
 import net.runelite.api.Client;
 import net.runelite.api.SpriteID;
+import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.widgets.WidgetID;
@@ -467,4 +468,5 @@ public abstract class QuestStep implements Module
 	{
 		return spriteManager.getSprite(SpriteID.TAB_QUESTS, 0);
 	}
+
 }

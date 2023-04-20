@@ -31,6 +31,8 @@ import com.google.inject.Injector;
 import com.google.inject.Provides;
 import com.questhelper.banktab.QuestBankTab;
 import com.questhelper.banktab.QuestHelperBankTagService;
+import com.questhelper.dynamicsequencer.DynamicCache;
+import com.questhelper.dynamicsequencer.DynamicProgress;
 import com.questhelper.overlays.QuestHelperDebugOverlay;
 import com.questhelper.overlays.QuestHelperOverlay;
 import com.questhelper.overlays.QuestHelperWidgetOverlay;
@@ -47,6 +49,7 @@ import com.questhelper.steps.playermadesteps.extendedruneliteobjects.RuneliteObj
 import com.google.inject.Module;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -56,6 +59,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
@@ -274,6 +278,9 @@ public class QuestHelperPlugin extends Plugin
 	{
 		return configManager.getConfig(QuestHelperConfig.class);
 	}
+	DynamicCache dynamicCache = new DynamicCache(eventBus);
+
+
 
 	@Override
 	protected void startUp() throws IOException
@@ -537,7 +544,21 @@ public class QuestHelperPlugin extends Plugin
 				startUpBackgroundQuest(QuestHelperQuest.CHECK_ITEMS.getName());
 			}
 		}
+
+		if ("dynamicSequencerEnabled".equals(event.getKey()))
+		{
+			clientThread.invokeLater(() -> {
+				if (config.dynamicSequencerEnabled())
+				{
+					extractDynamicQuests(getFilteredQuests(), dynamicProgressList -> {
+						// Handle the dynamicProgressList here
+						System.out.println("All tasks completed. Received dynamicProgressList: " + dynamicProgressList);
+					});
+				}
+			});
+		}
 	}
+
 
 	@Subscribe
 	public void onCommandExecuted(CommandExecuted commandExecuted)
@@ -735,7 +756,7 @@ public class QuestHelperPlugin extends Plugin
 						menuEntries = addRightClickMenuOptions(phoenixName, MENUOP_QUESTHELPER,
 							"<col=ff9040>" + phoenixName + "</col>", menuEntries, widgetIndex, widgetID);
 					}
-					if (questHelperBlackArm != null &&  !questHelperBlackArm.isCompleted())
+					if (questHelperBlackArm != null && !questHelperBlackArm.isCompleted())
 					{
 						addRightClickMenuOptions(blackArmName, MENUOP_QUESTHELPER,
 							"<col=ff9040>" + blackArmName + "</col>", menuEntries, widgetIndex, widgetID);
@@ -780,9 +801,10 @@ public class QuestHelperPlugin extends Plugin
 	@Subscribe
 	public void onChatMessage(ChatMessage chatMessage)
 	{
-		if (config.showFan() && chatMessage.getType() == ChatMessageType.GAMEMESSAGE) {
+		if (config.showFan() && chatMessage.getType() == ChatMessageType.GAMEMESSAGE)
+		{
 			if (chatMessage.getMessage().contains("Congratulations! Quest complete!") ||
-			chatMessage.getMessage().contains("you've completed a quest"))
+				chatMessage.getMessage().contains("you've completed a quest"))
 			{
 				addCheerer();
 			}
@@ -949,6 +971,7 @@ public class QuestHelperPlugin extends Plugin
 	// Helpers to run in the background without UI
 	public void startUpBackgroundQuest(String questHelperName)
 	{
+		log.debug("Quest names in QuestHelperQuest: {}", QuestHelperQuest.getQuestHelpers().stream().map(q -> q.getQuest().getName()).collect(Collectors.toList()));
 		if (!config.highlightItemsBackground())
 		{
 			return;
@@ -1078,11 +1101,11 @@ public class QuestHelperPlugin extends Plugin
 	{
 		QuestHelper questHelper = quest.getQuestHelper();
 
-			Module questModule = (Binder binder) ->
-			{
-				binder.bind(QuestHelper.class).toInstance(questHelper);
-				binder.install(questHelper);
-			};
+		Module questModule = (Binder binder) ->
+		{
+			binder.bind(QuestHelper.class).toInstance(questHelper);
+			binder.install(questHelper);
+		};
 		Injector questInjector = RuneLite.getInjector().createChildInjector(questModule);
 		injector.injectMembers(questHelper);
 		questHelper.setInjector(questInjector);
@@ -1091,5 +1114,106 @@ public class QuestHelperPlugin extends Plugin
 		questHelper.setQuestHelperPlugin(this);
 
 		log.debug("Loaded quest helper {}", quest.name());
+	}
+
+	public List<QuestHelper> getFilteredQuests()
+	{
+		List<QuestHelper> filteredQuests = Collections.emptyList();
+
+		if (client.getGameState() != GameState.LOGGED_IN)
+		{
+			return filteredQuests;
+		}
+
+		QuestHelperConfig.QuestFilter dynamicSequencingFilter = QuestHelperConfig.QuestFilter.SHOW_MEETS_REQS;
+		QuestHelperConfig.QuestOrdering dynamicSequencingOrder = QuestHelperConfig.QuestOrdering.OPTIMAL;
+
+		log.debug("Getting filtered quests");
+
+		filteredQuests = QuestHelperQuest.getQuestHelpers()
+			.stream()
+			.filter(dynamicSequencingFilter)
+			.filter(q -> {
+				QuestDetails.Type questType = q.getQuest().getQuestType();
+				return questType == QuestDetails.Type.F2P || questType == QuestDetails.Type.P2P || questType == QuestDetails.Type.MINIQUEST;
+			})
+			.filter(q -> !q.getQuest().getName().contains("RFD -")) // Add this line to filter out RFD subquests
+			.filter(q -> !q.isCompleted()) // exclude completed quests
+			.sorted(dynamicSequencingOrder)
+			.collect(Collectors.toList());
+
+		// Debug line: print the available quests
+		log.debug("Available quests: " + filteredQuests.size());
+
+		return filteredQuests;
+	}
+
+	public void startUpDynamicQuest(String questHelperName, Consumer<QuestHelper> callback) {
+		if (!(client.getGameState() == GameState.LOGGED_IN)) {
+			return;
+		}
+		if (dynamicCache.contains(questHelperName)) {
+			callback.accept(dynamicCache.get(questHelperName));
+			return;
+		}
+		if (selectedQuest != null && selectedQuest.getQuest().getName().equals(questHelperName)) {
+			return;
+		}
+		QuestHelper questHelper = QuestHelperQuest.getByName(questHelperName);
+		if (questHelper == null) {
+			return;
+		}
+		if (!questHelper.isCompleted()) {
+			eventBus.register(questHelper);
+			questHelper.startUp(config);
+			dynamicCache.put(questHelperName, questHelper);
+
+			if (questHelper.getCurrentStep() == null) {
+				questHelper.shutDown();
+				eventBus.unregister(questHelper);
+				dynamicCache.remove(questHelperName);
+			} else {
+				callback.accept(questHelper);
+			}
+		}
+	}
+
+	public interface DynamicProgressCallback
+	{
+		void onCompleted(List<DynamicProgress> dynamicProgressList);
+	}
+
+	public void extractDynamicQuests(List<QuestHelper> filteredQuests, DynamicProgressCallback callback) {
+		List<DynamicProgress> dynamicProgressList = new ArrayList<>();
+
+		if (filteredQuests.isEmpty()) {
+			System.out.println("No quests to extract dynamic progress for");
+			callback.onCompleted(dynamicProgressList);
+			return;
+		}
+
+		processDynamicQuests(filteredQuests, 0, dynamicProgressList, callback);
+	}
+
+	private void processDynamicQuests(List<QuestHelper> filteredQuests, int currentIndex, List<DynamicProgress> dynamicProgressList, DynamicProgressCallback callback) {
+		if (currentIndex >= filteredQuests.size()) {
+			System.out.println("All tasks completed, calling callback with dynamic progress list");
+
+			callback.onCompleted(dynamicProgressList);
+			return;
+		}
+		QuestHelper questHelper = filteredQuests.get(currentIndex);
+		startUpDynamicQuest(questHelper.getQuest().getName(), dynamicQuestHelper -> {
+			if (dynamicQuestHelper == null) {
+				// Process the next quest without adding a dynamic progress entry
+				processDynamicQuests(filteredQuests, currentIndex + 1, dynamicProgressList, callback);
+			} else {
+				// Create DynamicProgress object from dynamicQuestHelper and add it to the list
+				DynamicProgress dynamicProgress = DynamicProgress.fromQuestHelper(dynamicQuestHelper);
+				dynamicProgressList.add(dynamicProgress);
+				// Process the next quest
+				processDynamicQuests(filteredQuests, currentIndex + 1, dynamicProgressList, callback);
+			}
+		});
 	}
 }
