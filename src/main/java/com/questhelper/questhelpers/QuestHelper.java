@@ -105,69 +105,52 @@ public abstract class QuestHelper implements Module, QuestDebugRenderer
 
 	public abstract void startUp(QuestHelperConfig config);
 
-	public void shutDown()
-	{
+	public void shutDown() {
 		removeRuneliteObjects();
 	}
 
-	public void removeRuneliteObjects()
-	{
+	public void removeRuneliteObjects() {
 		runeliteObjectManager.removeGroupAndSubgroups(toString());
 	}
 
 	public abstract boolean updateQuest();
 
-	public void debugStartup(QuestHelperConfig config)
-	{
+	public void debugStartup(QuestHelperConfig config) {
 	}
 
-	protected void startUpStep(QuestStep step)
-	{
-		if (step != null)
-		{
+	protected void startUpStep(QuestStep step) {
+		if (step != null) {
 			currentStep = step;
 			currentStep.startUp();
 			eventBus.register(currentStep);
-		}
-		else
-		{
+		} else {
 			currentStep = null;
 		}
 	}
 
-	protected void shutDownStep()
-	{
-		if (currentStep != null)
-		{
+	protected void shutDownStep() {
+		if (currentStep != null) {
 			eventBus.unregister(currentStep);
 			currentStep.shutDown();
 			currentStep = null;
 		}
 	}
 
-	protected void instantiateSteps(Collection<QuestStep> steps)
-	{
-		for (QuestStep step : steps)
-		{
+	protected void instantiateSteps(Collection<QuestStep> steps) {
+		for (QuestStep step : steps) {
 			instantiateStep(step);
-			if (step instanceof OwnerStep)
-			{
+			if (step instanceof OwnerStep) {
 				instantiateSteps(((OwnerStep) step).getSteps());
 			}
 		}
 	}
 
-	public void instantiateStep(QuestStep questStep)
-	{
-		try
-		{
-			if (questStep != null)
-			{
+	public void instantiateStep(QuestStep questStep) {
+		try {
+			if (questStep != null) {
 				injector.injectMembers(questStep);
 			}
-		}
-		catch (CreationException ex)
-		{
+		} catch (CreationException ex) {
 			ex.printStackTrace();
 		}
 	}

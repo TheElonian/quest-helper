@@ -11,16 +11,18 @@ import net.runelite.api.coords.WorldPoint;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class DynamicProgress {
-	private static final Logger log = LoggerFactory.getLogger(DynamicProgress.class);
+public class DynamicSteps
+{
+	private static final Logger log = LoggerFactory.getLogger(DynamicSteps.class);
 
 	private final QuestHelper quest;
 	private final QuestStep activeStep;
 	private final WorldPoint stepLocation;
 	private final List<Requirement> requirements;
 	private final List<Requirement> recommended;
+	private List<QuestStep> remainingSteps;
 
-	public DynamicProgress(QuestHelper quest, QuestStep currentStep, WorldPoint stepLocation, List<Requirement> requirements, List<Requirement> recommended) {
+	public DynamicSteps(QuestHelper quest, QuestStep currentStep, WorldPoint stepLocation, List<Requirement> requirements, List<Requirement> recommended) {
 		this.quest = quest;
 		this.activeStep = currentStep.getActiveStep();
 		this.stepLocation = stepLocation;
@@ -45,7 +47,7 @@ public class DynamicProgress {
 		return recommended;
 	}
 
-	public static DynamicProgress fromQuestHelper(QuestHelper questHelper) {
+	public static DynamicSteps fromQuestHelper(QuestHelper questHelper) {
 		QuestStep activeStep = questHelper.getCurrentStep().getActiveStep();
 		WorldPoint stepLocation = null;
 		List<Requirement> requirements = null; // Initialize as null
@@ -58,6 +60,14 @@ public class DynamicProgress {
 			recommended = detailedQuestStep.getRecommended();
 		}
 		log.debug("Dynamic Parameters: {} {} {} {} {}", questHelper.getQuest().getName(), activeStep.getText(), stepLocation, requirements != null ? requirements.stream().map(Requirement::getDisplayText).collect(Collectors.joining(", ")) : "null", recommended != null ? recommended.stream().map(Requirement::getDisplayText).collect(Collectors.joining(", ")) : "null");
-		return new DynamicProgress(questHelper, activeStep, stepLocation, requirements, recommended);
+		return new DynamicSteps(questHelper, activeStep, stepLocation, requirements, recommended);
 	}
+	public List<QuestStep> getRemainingSteps() {
+		return remainingSteps;
+	}
+
+	public void setRemainingSteps(List<QuestStep> remainingSteps) {
+		this.remainingSteps = remainingSteps;
+	}
+
 }

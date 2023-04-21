@@ -91,4 +91,8 @@ public abstract class BasicQuestHelper extends QuestHelper
 	{
 		return new Conditions(LogicType.NOR, condition);
 	}
+
+	public List<QuestStep> getDynamicSteps() {
+		return new ArrayList<>(steps.values());
+	}
 }
