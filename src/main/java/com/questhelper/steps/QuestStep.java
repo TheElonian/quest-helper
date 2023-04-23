@@ -142,6 +142,7 @@ public abstract class QuestStep implements Module
 	@Setter
 	private boolean showInSidebar = true;
 
+	protected Requirement requirement;
 	public QuestStep(QuestHelper questHelper)
 	{
 		this.questHelper = questHelper;
@@ -468,5 +469,4 @@ public abstract class QuestStep implements Module
 	{
 		return spriteManager.getSprite(SpriteID.TAB_QUESTS, 0);
 	}
-
 }
