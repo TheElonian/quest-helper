@@ -92,7 +92,7 @@ public abstract class BasicQuestHelper extends QuestHelper
 		return new Conditions(LogicType.NOR, condition);
 	}
 
-	public List<QuestStep> getDynamicSteps() {
+	public List<QuestStep> getFilteredSteps() {
 		return new ArrayList<>(steps.values());
 	}
 }

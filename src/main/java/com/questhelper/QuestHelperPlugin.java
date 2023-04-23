@@ -32,19 +32,16 @@ import com.google.inject.Provides;
 import com.questhelper.banktab.QuestBankTab;
 import com.questhelper.banktab.QuestHelperBankTagService;
 import com.questhelper.dynamicsequencer.DynamicCache;
-import com.questhelper.dynamicsequencer.DynamicSteps;
+import com.questhelper.dynamicsequencer.DynamicProcessor;
 import com.questhelper.overlays.QuestHelperDebugOverlay;
 import com.questhelper.overlays.QuestHelperOverlay;
 import com.questhelper.overlays.QuestHelperWidgetOverlay;
 import com.questhelper.overlays.QuestHelperWorldArrowOverlay;
 import com.questhelper.overlays.QuestHelperWorldLineOverlay;
 import com.questhelper.overlays.QuestHelperWorldOverlay;
-import com.questhelper.panel.PanelDetails;
 import com.questhelper.panel.QuestHelperPanel;
-import com.questhelper.questhelpers.BasicQuestHelper;
 import com.questhelper.questhelpers.QuestDetails;
 import com.questhelper.questhelpers.QuestHelper;
-import com.questhelper.requirements.Requirement;
 import com.questhelper.requirements.item.ItemRequirement;
 import com.questhelper.steps.QuestStep;
 import com.questhelper.steps.playermadesteps.RuneliteConfigSetter;
@@ -52,7 +49,6 @@ import com.questhelper.steps.playermadesteps.extendedruneliteobjects.RuneliteObj
 import com.google.inject.Module;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -62,10 +58,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.SortedMap;
 import java.util.TreeMap;
-import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import javax.inject.Inject;
 import javax.inject.Named;
 import javax.swing.SwingUtilities;
@@ -287,6 +281,7 @@ public class QuestHelperPlugin extends Plugin
 		return configManager.getConfig(QuestHelperConfig.class);
 	}
 	DynamicCache dynamicCache = new DynamicCache(eventBus);
+	private DynamicProcessor dynamicProcessor;
 
 
 
@@ -343,6 +338,7 @@ public class QuestHelperPlugin extends Plugin
 				}
 			}
 		});
+		dynamicProcessor = new DynamicProcessor(client, config, eventBus, dynamicCache);
 	}
 
 	@Override
@@ -557,16 +553,14 @@ public class QuestHelperPlugin extends Plugin
 			clientThread.invokeLater(() -> {
 				if (config.dynamicSequencerEnabled())
 				{
-					List<QuestHelper> dynamicQuests = dynamicFilter();
-					DynamicExtractionCallback callback = null;
+					List<QuestHelper> dynamicQuests = dynamicProcessor.dynamicFilter();
 
-					callback = (currentSteps, remainingNormalSteps, diarySteps) -> {
-						// Process the extracted DynamicSteps lists here
+					dynamicProcessor.extractDynamicQuests(dynamicQuests, (currentSteps, remainingNormalSteps, diarySteps) -> {
+						// Process the extracted Steps here
 						System.out.println("Current Steps: " + currentSteps.size());
 						System.out.println("Remaining Normal Steps: " + remainingNormalSteps.size());
 						System.out.println("Diary Steps: " + diarySteps.size());
-					};
-					extractDynamicQuests(dynamicQuests, callback);
+					});
 				}
 			});
 		}
@@ -1127,171 +1121,5 @@ public class QuestHelperPlugin extends Plugin
 		questHelper.setQuestHelperPlugin(this);
 
 		log.debug("Loaded quest helper {}", quest.name());
-	}
-
-	public List<QuestHelper> dynamicFilter() {
-		List<QuestHelper> dynamicQuests = Collections.emptyList();
-
-		if (client.getGameState() != GameState.LOGGED_IN) {
-			return dynamicQuests;
-		}
-
-		QuestHelperConfig.QuestFilter dynamicSequencingFilter = QuestHelperConfig.QuestFilter.SHOW_MEETS_REQS;
-
-		log.debug("Getting filtered quests");
-
-		List<QuestHelper> normalQuests = QuestHelperQuest.getQuestHelpers()
-			.stream()
-			.filter(dynamicSequencingFilter)
-			.filter(q -> {
-				QuestDetails.Type questType = q.getQuest().getQuestType();
-				return questType == QuestDetails.Type.F2P || questType == QuestDetails.Type.P2P || questType == QuestDetails.Type.MINIQUEST;
-			})
-			.collect(Collectors.toList());
-
-		log.debug("Filtering diary quests...");
-		List<QuestHelper> diaryQuests = QuestHelperQuest.getQuestHelpers()
-			.stream()
-			.filter(q -> q.getQuest().getQuestType() == QuestDetails.Type.ACHIEVEMENT_DIARY)
-			.collect(Collectors.toList());
-
-		log.debug("Concatenating quests...");
-		dynamicQuests = Stream.concat(normalQuests.stream(), diaryQuests.stream())
-			.filter(q -> !q.isCompleted()) // exclude completed quests
-			.collect(Collectors.toList());
-
-		log.debug("Available quests: " + dynamicQuests.size());
-
-		return dynamicQuests;
-	}
-
-	public void startUpDynamicQuest(String dynamicHelperName, Consumer<QuestHelper> callback) {
-		if (!(client.getGameState() == GameState.LOGGED_IN)) {
-			return;
-		}
-		if (dynamicCache.contains(dynamicHelperName)) {
-			log.debug("Found dynamic quest {} in cache.", dynamicHelperName);
-			callback.accept(dynamicCache.get(dynamicHelperName));
-			return;
-		}
-		log.debug("Checking selected quest...");
-		if (selectedQuest != null && selectedQuest.getQuest().getName().equals(dynamicHelperName)) {
-			log.debug("Selected quest is already {}.", dynamicHelperName);
-			return;
-		}
-		log.debug("Starting up dynamic quest {}...", dynamicHelperName);
-		QuestHelper dynamicHelper = QuestHelperQuest.getByName(dynamicHelperName);
-		if (dynamicHelper == null) {
-			log.debug("Dynamic quest {} not found.", dynamicHelperName);
-			return;
-		}
-		if (dynamicHelper.isCompleted()) {
-			log.debug("Dynamic quest {} is already completed.", dynamicHelperName);
-			return;
-		}
-		log.debug("Registering dynamic quest helper...");
-		eventBus.register(dynamicHelper);
-		dynamicHelper.startUp(config);
-		dynamicCache.put(dynamicHelperName, dynamicHelper);
-
-		if (dynamicHelper.getCurrentStep() == null) {
-			log.debug("Dynamic quest {} has no current step. Shutting down.", dynamicHelperName);
-			dynamicHelper.shutDown();
-			eventBus.unregister(dynamicHelper);
-			dynamicCache.remove(dynamicHelperName);
-		} else {
-			log.debug("Callback accepted for dynamic quest {}.", dynamicHelperName);
-			callback.accept(dynamicHelper);
-		}
-	}
-
-	public interface DynamicExtractionCallback {
-		void onCompleted(List<DynamicSteps> currentSteps, List<DynamicSteps> remainingNormalSteps, List<DynamicSteps> diarySteps);
-	}
-
-
-
-	public void extractDynamicQuests(List<QuestHelper> dynamicQuests, DynamicExtractionCallback callback) {
-		log.debug("Starting dynamic quest extraction...");
-		List<QuestStep> currentSteps = new ArrayList<>();
-		List<QuestStep> remainingNormalSteps = new ArrayList<>();
-		List<QuestStep> diarySteps = new ArrayList<>();
-
-		if (dynamicQuests.isEmpty()) {
-			log.debug("Dynamic quest list is empty. Returning parameters.");
-			Map<String, List<DynamicSteps>> dynamicStepParameters = DynamicSteps.extractParameters(currentSteps, remainingNormalSteps, diarySteps);
-			callback.onCompleted(dynamicStepParameters.get("currentSteps"), dynamicStepParameters.get("remainingNormalSteps"), dynamicStepParameters.get("diarySteps"));
-			return;
-		}
-
-		processDynamicQuests(dynamicQuests, 0, currentSteps, remainingNormalSteps, diarySteps, callback);
-	}
-	private void processDynamicQuests(List<QuestHelper> DynamicQuests, int currentIndex, List<QuestStep> currentSteps, List<QuestStep> remainingNormalSteps, List<QuestStep> diarySteps, DynamicExtractionCallback callback) {
-		logger.debug("Entering processDynamicQuests with currentIndex: {}", currentIndex);
-
-		if (currentIndex >= DynamicQuests.size()) {
-			logger.debug("Current index is greater or equal to the size of DynamicQuests. Calling callback.onCompleted.");
-			Map<String, List<DynamicSteps>> dynamicStepParameters = DynamicSteps.extractParameters(currentSteps, remainingNormalSteps, diarySteps);
-			callback.onCompleted(dynamicStepParameters.get("currentSteps"), dynamicStepParameters.get("remainingNormalSteps"), dynamicStepParameters.get("diarySteps"));
-			return;
-		}
-
-		QuestHelper questHelper = DynamicQuests.get(currentIndex);
-		logger.debug("Processing quest: {}", questHelper.getQuest().getName());
-
-		startUpDynamicQuest(questHelper.getQuest().getName(), dynamicQuestHelper -> {
-			if (dynamicQuestHelper == null) {
-				logger.debug("DynamicQuestHelper is null, continuing to next quest.");
-				processDynamicQuests(DynamicQuests, currentIndex + 1, currentSteps, remainingNormalSteps, diarySteps, callback);
-			} else {
-				if (dynamicQuestHelper.getQuest().getQuestType() == QuestDetails.Type.ACHIEVEMENT_DIARY) {
-					List<PanelDetails> panelDetailsList = dynamicQuestHelper.getPanels();
-					for (PanelDetails panelDetail : panelDetailsList) {
-						// Check if the panel is hidden
-						Requirement hideCondition = panelDetail.getHideCondition();
-						if (hideCondition != null && hideCondition.check(client)) {
-							continue;
-						}
-						// Check if all requirements are met
-						if (panelDetail.getRequirements().stream().allMatch(requirement -> requirement.check(client))) {
-							// Exclude QuestStep with claimReward, unless it's the only panelDetail left
-							List<QuestStep> questSteps = panelDetail.getSteps();
-							if (questSteps.size() == 1 && questSteps.get(0).equals(claimReward)) {
-								continue;
-							}
-							diarySteps.add(questSteps.get(0));
-						}
-					}
-
-				} else if (dynamicQuestHelper instanceof BasicQuestHelper) {
-					BasicQuestHelper dynamicBasic = (BasicQuestHelper) dynamicQuestHelper;
-
-					List<QuestStep> dynamicSteps = dynamicBasic.getDynamicSteps();
-					QuestStep currentStep = dynamicQuestHelper.getCurrentStep().getActiveStep();
-
-					boolean foundCurrentStep = false;
-
-					for (QuestStep step : dynamicSteps) {
-						if (step == currentStep) {
-							foundCurrentStep = true;
-						}
-						if (foundCurrentStep) {
-							remainingNormalSteps.add(step);
-						} else {
-							currentSteps.add(step);
-						}
-					}
-				}
-
-				if (dynamicQuestHelper.isCompleted()) {
-					logger.debug("DynamicQuestHelper is completed. Shutting down, unregistering, and removing from cache.");
-					dynamicQuestHelper.shutDown();
-					eventBus.unregister(dynamicQuestHelper);
-					dynamicCache.remove(dynamicQuestHelper.getQuest().getName());
-				}
-
-				processDynamicQuests(DynamicQuests, currentIndex + 1, currentSteps, remainingNormalSteps, diarySteps, callback);
-			}
-		});
 	}
 }
